@@ -10,33 +10,39 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const SIDEBAR_EXPANDED_WIDTH = 250;
+const SIDEBAR_COLLAPSED_WIDTH = 60;
+const USER_RESPONSE_DELAY = 500;
+const OPTION_RESPONSE_DELAY = 800;
+const FOLLOWUP_RESPONSE_DELAY = 500;
+
+const OPTIONS = ["Tell me a fact", "Give me advice", "Share a quote"];
+const WELCOME_MESSAGE = {
+  id: Date.now(),
+  content: "Hello! I'm here to help. What would you like to talk about?",
+  role: "assistant" as "user" | "assistant" | "system",
+  options: OPTIONS,
+};
+
+type MessageRole = "user" | "assistant" | "system";
+
+type Message = {
+  id: number;
+  content: string;
+  role: MessageRole;
+  options?: string[];
+  isOptionMessage?: boolean;
+};
+
+type Conversation = {
+  id: number;
+  title: string;
+  messages: Message[];
+};
 
 function App() {
-  type MessageRole = "user" | "assistant" | "system";
-
-  type Message = {
-    id: number;
-    content: string;
-    role: MessageRole;
-    options?: string[];
-    isOptionMessage?: boolean;
-  };
-
-  type Conversation = {
-    id: number;
-    title: string;
-    messages: Message[];
-  };
-
-  const OPTIONS = ["Tell me a fact", "Give me advice", "Share a quote"];
-  const WELCOME_MESSAGE = {
-    id: Date.now(),
-    content: "Hello! I'm here to help. What would you like to talk about?",
-    role: "assistant" as MessageRole,
-    options: OPTIONS,
-  };
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [model, setModel] = useState("Luminous");
@@ -78,7 +84,52 @@ function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const handleSend = () => {
+  const getResponseForOption = useCallback((option: string): string => {
+    if (option === "Tell me a fact") {
+      return "Did you know that honey never spoils? Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly good to eat!";
+    } else if (option === "Give me advice") {
+      return "When learning something new, try teaching it to someone else. This 'Feynman Technique' helps reinforce your understanding and identify gaps in your knowledge.";
+    } else if (option === "Share a quote") {
+      return `"The greatest glory in living lies not in never falling, but in rising every time we fall." — Nelson Mandela`;
+    }
+    return "";
+  }, []);
+
+  const processOptionSelection = useCallback(
+    (option: string) => {
+      const userOptionMessage: Message = {
+        id: Date.now(),
+        content: option,
+        role: "user",
+        isOptionMessage: true,
+      };
+      setMessages((prevMessages) => [...prevMessages, userOptionMessage]);
+
+      setTimeout(() => {
+        const responseContent = getResponseForOption(option);
+        const botResponse: Message = {
+          id: Date.now(),
+          content: responseContent,
+          role: "assistant",
+        };
+
+        setMessages((prevMessages) => [...prevMessages, botResponse]);
+
+        setTimeout(() => {
+          const followUpMessage: Message = {
+            id: Date.now() + 1,
+            content: "Thanks for selecting an option! Please select another:",
+            role: "assistant",
+            options: OPTIONS,
+          };
+          setMessages((prevMessages) => [...prevMessages, followUpMessage]);
+        }, FOLLOWUP_RESPONSE_DELAY);
+      }, OPTION_RESPONSE_DELAY);
+    },
+    [getResponseForOption]
+  );
+
+  const handleSend = useCallback(() => {
     if (input) {
       const newUserMessage: Message = {
         id: Date.now(),
@@ -97,58 +148,19 @@ function App() {
           role: "assistant",
           options: OPTIONS,
         };
-
         setMessages((prevMessages) => [...prevMessages, responseMessage]);
-      }, 500);
+      }, USER_RESPONSE_DELAY);
     }
-  };
+  }, [input]);
 
-  const handleOptionClick = (option: string) => {
-    const userOptionMessage: Message = {
-      id: Date.now(),
-      content: option,
-      role: "user",
-      isOptionMessage: true,
-    };
+  const handleOptionClick = useCallback(
+    (option: string) => {
+      processOptionSelection(option);
+    },
+    [processOptionSelection]
+  );
 
-    setMessages((prevMessages) => [...prevMessages, userOptionMessage]);
-
-    setTimeout(() => {
-      let responseContent = "";
-
-      if (option === "Tell me a fact") {
-        responseContent =
-          "Did you know that honey never spoils? Archaeologists have found pots of honey in ancient Egyptian tombs that are over 3,000 years old and still perfectly good to eat!";
-      } else if (option === "Give me advice") {
-        responseContent =
-          "When learning something new, try teaching it to someone else. This 'Feynman Technique' helps reinforce your understanding and identify gaps in your knowledge.";
-      } else if (option === "Share a quote") {
-        responseContent =
-          '"The greatest glory in living lies not in never falling, but in rising every time we fall." — Nelson Mandela';
-      }
-
-      const botResponse: Message = {
-        id: Date.now(),
-        content: responseContent,
-        role: "assistant",
-      };
-
-      setMessages((prevMessages) => [...prevMessages, botResponse]);
-
-      setTimeout(() => {
-        const followUpMessage: Message = {
-          id: Date.now() + 1,
-          content: "Thanks for selecting an option! Please select another:",
-          role: "assistant",
-          options: OPTIONS,
-        };
-
-        setMessages((prevMessages) => [...prevMessages, followUpMessage]);
-      }, 500);
-    }, 800);
-  };
-
-  const saveCurrentConversation = () => {
+  const saveCurrentConversation = useCallback(() => {
     if (messages.length > 1) {
       const conversationTitle = `Previous Conversation ${
         conversations.length + 1
@@ -161,74 +173,86 @@ function App() {
 
       setConversations((prev) => [...prev, newConversation]);
     }
-  };
+  }, [messages, conversations.length]);
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     saveCurrentConversation();
-
     setMessages([]);
     setCurrentConversationId(null);
-  };
+  }, [saveCurrentConversation]);
 
-  const loadConversation = (conversationId: number) => {
-    const conversation = conversations.find(
-      (conv) => conv.id === conversationId
-    );
-    if (conversation) {
-      if (messages.length > 1 && currentConversationId !== conversationId) {
-        saveCurrentConversation();
+  const loadConversation = useCallback(
+    (conversationId: number) => {
+      const conversation = conversations.find(
+        (conv) => conv.id === conversationId
+      );
+      if (conversation) {
+        if (messages.length > 1 && currentConversationId !== conversationId) {
+          saveCurrentConversation();
+        }
+        setMessages(conversation.messages);
+        setCurrentConversationId(conversationId);
       }
-
-      setMessages(conversation.messages);
-      setCurrentConversationId(conversationId);
-    }
-  };
-
-  const toggleConfig = () => {
-    setConfigOpen(!configOpen);
-  };
-
-  const OptionButtons = ({ options }: { options: string[] }) => (
-    <div className="flex flex-col gap-2 mt-3">
-      {options.map((option) => (
-        <button
-          key={option}
-          onClick={() => handleOptionClick(option)}
-          className="py-2 px-4 bg-gray-700 bg-opacity-70 hover:bg-gray-600 rounded text-white text-left cursor-pointer transition-colors flex justify-between items-center w-full"
-        >
-          <span>{option}</span>
-          <span>&gt;</span>
-        </button>
-      ))}
-    </div>
+    },
+    [
+      conversations,
+      messages.length,
+      currentConversationId,
+      saveCurrentConversation,
+    ]
   );
 
-  const ToggleSwitch = ({
-    label,
-    enabled,
-    setEnabled,
-  }: {
-    label: string;
-    enabled: boolean;
-    setEnabled: (value: boolean) => void;
-  }) => (
-    <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center text-sm">
-        <span>{label}</span>
+  const toggleConfig = useCallback(() => {
+    setConfigOpen((prev) => !prev);
+  }, []);
+
+  const OptionButtons = useCallback(
+    ({ options }: { options: string[] }) => (
+      <div className="flex flex-col gap-2 mt-3">
+        {options.map((option) => (
+          <button
+            key={option}
+            onClick={() => handleOptionClick(option)}
+            className="py-2 px-4 bg-gray-700 bg-opacity-70 hover:bg-gray-600 rounded text-white text-left cursor-pointer transition-colors flex justify-between items-center w-full"
+          >
+            <span>{option}</span>
+            <span>&gt;</span>
+          </button>
+        ))}
       </div>
-      <button
-        onClick={() => setEnabled(!enabled)}
-        className={`relative w-10 h-5 rounded-full transition-colors duration-300 ease-in-out ${
-          enabled ? "bg-amber-500" : "bg-orange-800 opacity-70"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-300 ease-in-out ${
-            enabled ? "translate-x-5" : "translate-x-0"
+    ),
+    [handleOptionClick]
+  );
+
+  const ToggleSwitch = useCallback(
+    ({
+      label,
+      enabled,
+      setEnabled,
+    }: {
+      label: string;
+      enabled: boolean;
+      setEnabled: (value: boolean) => void;
+    }) => (
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center text-sm">
+          <span>{label}</span>
+        </div>
+        <button
+          onClick={() => setEnabled(!enabled)}
+          className={`relative w-10 h-5 rounded-full transition-colors duration-300 ease-in-out ${
+            enabled ? "bg-amber-500" : "bg-orange-800 opacity-70"
           }`}
-        />
-      </button>
-    </div>
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-300 ease-in-out ${
+              enabled ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+    ),
+    []
   );
 
   const blinkingDotStyle = {
@@ -305,7 +329,10 @@ function App() {
       `}</style>
 
       {sidebarCollapsed ? (
-        <div className="bg-stone-800 text-white p-2 sidebar border-r border-gray-700 transition-all duration-300 ease-in-out w-[60px]">
+        <div
+          className="bg-stone-800 text-white p-2 sidebar border-r border-gray-700 transition-all duration-300 ease-in-out"
+          style={{ width: SIDEBAR_COLLAPSED_WIDTH }}
+        >
           <div className="flex flex-col items-center space-y-5">
             <button className="bg-amber-500 p-1.5 rounded flex items-center justify-center">
               <Lightbulb size={16} />
@@ -320,7 +347,10 @@ function App() {
           </div>
         </div>
       ) : (
-        <div className="bg-stone-800 text-white p-2.5 sidebar border-r border-gray-700 transition-all duration-300 ease-in-out w-[250px]">
+        <div
+          className="bg-stone-800 text-white p-2.5 sidebar border-r border-gray-700 transition-all duration-300 ease-in-out"
+          style={{ width: SIDEBAR_EXPANDED_WIDTH }}
+        >
           <div className="mb-5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button className="bg-amber-500 p-1.5 rounded flex items-center justify-center">
